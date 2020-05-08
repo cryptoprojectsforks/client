@@ -35,6 +35,8 @@ foreach my $os (@oses) {
         next;
     }
     $ENV{'GOOS'} = $os;
+    chomp(my $gomodulepattern = `mktemp`);
+    system "go list -f '{{ .Path }}' -m all | sed 's/^/\\\^/' | sed 's/\$/\\(\\/\\|\\\$\)/' | sort > '$gomodulepattern'";
     my $i = 0;
     my $num_packages = scalar @{$os_packages->{$os}};
     foreach my $package (@{$os_packages->{$os}}) {
@@ -42,10 +44,10 @@ foreach my $os (@oses) {
         my $percent_complete = (($i) * 100) / $num_packages;
         printf STDERR ("%7s: %3d of %3d complete (%3.0f%%) [%s]\n", $os, $i, $num_packages, $percent_complete, $package);
 
-        # This should include vendored dependencies.
-        my @deps = split /\n/, `go list -f '{{ printf "%s\\n%s\\n%s" (join .TestImports "\\n") (join .Imports "\\n") "$package" }}' "$package" 2>/dev/null | grep 'vendor\\|github.com/keybase/client' | sort | uniq`;
+        # This should include dependencies required by go.mod
+        my @deps = split /\n/, `go list -f '{{ printf "%s\\n%s\\n%s" (join .TestImports "\\n") (join .Imports "\\n") "$package" }}' "$package" 2>/dev/null | grep -Ef "$gomodulepattern" | sort | uniq`;
         my $deps = join(' ', @deps);
-        my @indirect_deps = split /\n/, `go list -f '{{ join .Deps "\\n" }}' $deps 2>/dev/null | sort | uniq | grep 'vendor\\|github.com\\/keybase\\/client' | grep -v '$excluded_pkg_regex'`;
+        my @indirect_deps = split /\n/, `go list -f '{{ join .Deps "\\n" }}' $deps 2>/dev/null | sort | uniq | grep -Ef "$gomodulepattern" | grep -v '$excluded_pkg_regex'`;
         push(@deps, @indirect_deps);
 
         foreach my $dep (do { my %deps; grep { !$deps{$_}++ } @deps}) {
